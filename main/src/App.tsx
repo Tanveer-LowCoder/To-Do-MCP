@@ -1,55 +1,132 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MainLayout } from './layouts/MainLayout';
 import { Card, Input, Button } from './components/ui';
 import { TaskInput, TaskList } from './components';
-
-// Task interface as defined in PRD
-interface Task {
-  id: number;
-  title: string;
-  done: boolean;
-  created_at: string;
-}
-
-// Dummy task data for demonstration
-const dummyTasks: Task[] = [
-  { id: 1, title: "Set up Tauri development environment", done: true, created_at: "2025-01-19T08:00:00Z" },
-  { id: 2, title: "Implement UI components as per PRD specifications", done: true, created_at: "2025-01-19T09:00:00Z" },
-  { id: 3, title: "Create task management interface", done: false, created_at: "2025-01-19T10:00:00Z" },
-  { id: 4, title: "Implement SQLite data persistence", done: false, created_at: "2025-01-19T11:00:00Z" },
-  { id: 5, title: "Add task categories and filtering", done: false, created_at: "2025-01-19T12:00:00Z" },
-];
+import { db, Task } from './lib/db';
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>(dummyTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleAddTask = (title: string) => {
-    const newTask: Task = {
-      id: Math.max(...tasks.map(t => t.id), 0) + 1,
-      title: title,
-      done: false,
-      created_at: new Date().toISOString(),
-    };
-    setTasks([newTask, ...tasks]); // New tasks added to top of active tasks
+  // Initialize database and load tasks on app start
+  useEffect(() => {
+    initializeApp();
+  }, []);
+
+  const initializeApp = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      // Initialize database
+      await db.initialize();
+      
+      // Load existing tasks
+      await loadTasks();
+    } catch (error) {
+      console.error('Failed to initialize app:', error);
+      setError(error instanceof Error ? error.message : 'Failed to initialize app');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleToggleTask = (id: number) => {
-    setTasks(tasks.map(task => 
-      task.id === id ? { ...task, done: !task.done } : task
-    ));
+  const loadTasks = async () => {
+    try {
+      const allTasks = await db.getAllTasks();
+      setTasks(allTasks);
+    } catch (error) {
+      console.error('Failed to load tasks:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load tasks');
+    }
   };
 
-  const handleDeleteTask = (id: number) => {
-    setTasks(tasks.filter(task => task.id !== id));
+  const handleAddTask = async (title: string) => {
+    try {
+      // Create task in database (as per R-PERSIST-1 acceptance criteria)
+      const newTask = await db.createTask(title);
+      
+      // Add to local state (new tasks added to top of active tasks)
+      setTasks(prevTasks => [newTask, ...prevTasks]);
+    } catch (error) {
+      console.error('Failed to add task:', error);
+      setError(error instanceof Error ? error.message : 'Failed to add task');
+    }
+  };
+
+  const handleToggleTask = async (id: number) => {
+    try {
+      const currentTask = tasks.find(task => task.id === id);
+      if (!currentTask) return;
+      
+      // Update task status in database (as per R-PERSIST-1 acceptance criteria)
+      const updatedTask = await db.toggleTask(id, !currentTask.done);
+      
+      // Update local state with immediate feedback
+      setTasks(prevTasks => 
+        prevTasks.map(task => 
+          task.id === id ? updatedTask : task
+        )
+      );
+    } catch (error) {
+      console.error('Failed to toggle task:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update task');
+    }
+  };
+
+  const handleDeleteTask = async (id: number) => {
+    try {
+      // Delete from database (permanent removal, no recovery as per acceptance criteria)
+      await db.deleteTask(id);
+      
+      // Remove from local state with immediate feedback
+      setTasks(prevTasks => prevTasks.filter(task => task.id !== id));
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      setError(error instanceof Error ? error.message : 'Failed to delete task');
+    }
   };
 
   const activeTasks = tasks.filter(task => !task.done);
   const completedTasks = tasks.filter(task => task.done);
   const remainingCount = activeTasks.length;
 
+  // Show loading state during app initialization
+  if (isLoading) {
+    return (
+      <MainLayout>
+        <Card>
+          <div className="text-center py-container-padding">
+            <p className="text-body">Initializing database...</p>
+          </div>
+        </Card>
+      </MainLayout>
+    );
+  }
+
   return (
     <MainLayout>
       <div className="space-y-component-gap">
+        {/* Error Display */}
+        {error && (
+          <Card>
+            <div className="text-center py-item-margin text-red-600 border border-red-300 bg-red-50 p-item-margin">
+              <p className="text-body font-medium">Error: {error}</p>
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  setError(null);
+                  loadTasks();
+                }}
+                className="mt-item-margin text-small"
+              >
+                Retry
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {/* Task Input Section using TaskInput component */}
         <Card>
           <TaskInput onAddTask={handleAddTask} />
@@ -79,19 +156,41 @@ function App() {
         {/* Component Showcase */}
         <Card>
           <div className="space-y-item-margin">
-            <h2 className="text-title font-bold mb-component-gap">R-CRUD-1: Task Management Interface - DEMO</h2>
+            <h2 className="text-title font-bold mb-component-gap">✅ All PRD Requirements Complete!</h2>
             
             <div className="space-y-component-gap">
-              {/* Task Management Features */}
+              {/* R-UI-1 Features */}
               <div>
-                <h3 className="text-body font-medium mb-item-margin">✅ Implemented Features</h3>
+                <h3 className="text-body font-medium mb-item-margin">✅ R-UI-1: User Interface</h3>
+                <ul className="space-y-item-margin text-small">
+                  <li>• Tailwind theme with black borders (2px), white background</li>
+                  <li>• Typography hierarchy: Title (24px), Body (16px), Small (14px)</li>
+                  <li>• Interactive states: hover, focus, active feedback</li>
+                  <li>• Card, Input, Button, Checkbox components</li>
+                </ul>
+              </div>
+
+              {/* R-CRUD-1 Features */}
+              <div>
+                <h3 className="text-body font-medium mb-item-margin">✅ R-CRUD-1: Task Management Interface</h3>
                 <ul className="space-y-item-margin text-small">
                   <li>• TaskInput: Add new tasks with Enter key support (max 256 chars)</li>
                   <li>• TaskList: Sorted display (active first, then completed)</li>
                   <li>• TaskItem: Toggle completion, delete on hover with confirmation</li>
                   <li>• Visual feedback: Strikethrough for completed tasks</li>
                   <li>• Immediate UI updates on all operations</li>
-                  <li>• Empty state handling</li>
+                </ul>
+              </div>
+
+              {/* R-PERSIST-1 Features */}
+              <div>
+                <h3 className="text-body font-medium mb-item-margin">✅ R-PERSIST-1: SQLite Data Persistence</h3>
+                <ul className="space-y-item-margin text-small">
+                  <li>• Local SQLite database with automatic initialization</li>
+                  <li>• Task CRUD operations with validation and error handling</li>
+                  <li>• Data persistence between app sessions</li>
+                  <li>• Transaction support for data integrity</li>
+                  <li>• Efficient indexing for performance</li>
                 </ul>
               </div>
 
